@@ -1,0 +1,167 @@
+import { aiAnalysisSchema } from "@/lib/domain/types";
+import { workflowLog } from "@/lib/logger";
+import type { AiProviderResult, AiSupportProvider } from "./types";
+
+type AnthropicMessageResponse = {
+  id: string;
+  model: string;
+  content: Array<{
+    type: string;
+    text?: string;
+  }>;
+};
+
+const categories = [
+  "damaged_item",
+  "refund_request",
+  "shipping_issue",
+  "account_issue",
+  "technical_issue",
+  "other",
+] as const;
+
+const requiredShape = {
+  category: "one of the provided categories",
+  sentiment: "short string",
+  priority: "integer from 1 to 5",
+  confidence: "number from 0 to 1",
+  summary: "one short paragraph",
+  draftReply: "customer-ready support reply",
+};
+
+function parseJsonFromClaudeText(text: string): unknown {
+  const trimmed = text.trim();
+
+  try {
+    workflowLog("AI parser accepted raw JSON response");
+    return JSON.parse(trimmed);
+  } catch {
+    const unfenced = trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    try {
+      workflowLog("AI parser stripped Markdown code fence before parsing JSON");
+      return JSON.parse(unfenced);
+    } catch {
+      const objectStart = unfenced.indexOf("{");
+      const objectEnd = unfenced.lastIndexOf("}");
+
+      if (objectStart >= 0 && objectEnd > objectStart) {
+        workflowLog("AI parser extracted first JSON object from response text");
+        return JSON.parse(unfenced.slice(objectStart, objectEnd + 1));
+      }
+
+      throw new Error("Anthropic response did not contain valid JSON.");
+    }
+  }
+}
+
+export class AnthropicSupportProvider implements AiSupportProvider {
+  private readonly model = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-6";
+  private readonly apiKey = process.env.ANTHROPIC_API_KEY;
+
+  async analyzeTicket({ ticket }: Parameters<AiSupportProvider["analyzeTicket"]>[0]): Promise<AiProviderResult> {
+    if (!this.apiKey) {
+      throw new Error("ANTHROPIC_API_KEY is required for ticket analysis.");
+    }
+
+    const startedAt = Date.now();
+    workflowLog("calling Anthropic Messages API", {
+      ticketId: ticket.id,
+      model: this.model,
+    });
+
+    const analysisPayload = {
+      categories,
+      requiredShape,
+      ticket: {
+        id: ticket.id,
+        customerEmail: ticket.customerEmail,
+        subject: ticket.subject,
+        body: ticket.body,
+        status: ticket.status,
+      },
+    };
+
+    workflowLog("AI analysis input prepared", {
+      ticketId: ticket.id,
+      categories,
+      requiredShape,
+      subject: ticket.subject,
+      bodyCharacterCount: ticket.body.length,
+      body: ticket.body,
+    });
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 1000,
+        system:
+          "You classify customer support tickets and draft concise, empathetic replies. Return a raw JSON object only. Do not wrap it in Markdown, code fences, or explanatory text. The JSON object must contain category, sentiment, priority, confidence, summary, and draftReply.",
+        messages: [
+          {
+            role: "user",
+            content: JSON.stringify(analysisPayload),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      workflowLog("Anthropic API returned an error", {
+        ticketId: ticket.id,
+        status: response.status,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw new Error(`Anthropic API request failed: ${response.status} ${detail}`);
+    }
+
+    const rawOutput = (await response.json()) as AnthropicMessageResponse;
+    const text = rawOutput.content.find((item) => item.type === "text")?.text ?? "{}";
+    workflowLog("Anthropic raw analysis text", {
+      ticketId: ticket.id,
+      text,
+    });
+
+    workflowLog("parsing Anthropic analysis JSON", {
+      ticketId: ticket.id,
+      textStartsWith: text.trim().slice(0, 12),
+      textCharacterCount: text.length,
+    });
+
+    const output = aiAnalysisSchema.parse(parseJsonFromClaudeText(text));
+
+    workflowLog("Anthropic response parsed", {
+      ticketId: ticket.id,
+      responseId: rawOutput.id,
+      model: rawOutput.model,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    workflowLog("validated analysis fields", {
+      ticketId: ticket.id,
+      category: output.category,
+      sentiment: output.sentiment,
+      priority: output.priority,
+      confidence: output.confidence,
+      summary: output.summary,
+      draftReply: output.draftReply,
+    });
+
+    return {
+      provider: "anthropic",
+      model: rawOutput.model || this.model,
+      output,
+      rawOutput,
+    };
+  }
+}
