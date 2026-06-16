@@ -234,11 +234,6 @@ erDiagram
       review_decision decision
     }
 ```
-
-Initial schema is created by:
-
-- [migrations/001_create_support_workflow.sql]
-
 ## Observability and Debugging
 
 The app logs workflow events to the terminal, including:
