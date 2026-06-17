@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:full": "concurrently -k -n app,worker \"npm:dev\" \"npm:worker:loop\"",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit --incremental false",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "worker:once": "tsx scripts/worker-once.ts",
+    "worker:loop": "tsx scripts/worker-loop.ts"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -23,6 +26,9 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
+    "concurrently": "^10.0.3",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.2",
     "vitest": "^4.1.9"
   }

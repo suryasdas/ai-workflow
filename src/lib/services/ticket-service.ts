@@ -1,8 +1,8 @@
 import { getPool } from "@/lib/db/client";
-import { aiAnalysisSchema, createTicketSchema, reviewTicketSchema } from "@/lib/domain/types";
+import { createTicketSchema, reviewTicketSchema } from "@/lib/domain/types";
 import type { CreateTicketInput, ReviewTicketInput, TicketWithDetails } from "@/lib/domain/types";
 import { statusForReviewDecision } from "@/lib/domain/ticket-state";
-import { createAiProvider } from "@/lib/ai/provider-factory";
+import { AnalysisJobRepository } from "@/lib/repositories/analysis-job-repository";
 import { AnalysisRepository } from "@/lib/repositories/analysis-repository";
 import { ReviewRepository } from "@/lib/repositories/review-repository";
 import { TicketRepository } from "@/lib/repositories/ticket-repository";
@@ -13,95 +13,46 @@ export class TicketService {
 
   async submitTicket(input: CreateTicketInput) {
     const parsed = createTicketSchema.parse(input);
-    const tickets = new TicketRepository(this.pool);
-
-    workflowLog("validated ticket submission", {
-      customerEmail: parsed.customerEmail,
-      subject: parsed.subject,
-    });
-
-    const ticket = await tickets.create(parsed);
-    workflowLog("saved ticket", {
-      ticketId: ticket.id,
-      status: ticket.status,
-    });
-
-    await tickets.updateStatus(ticket.id, "processing");
-    workflowLog("ticket moved to processing", {
-      ticketId: ticket.id,
-    });
-
-    await this.processTicket(ticket.id);
-    return ticket;
-  }
-
-  async processTicket(ticketId: string) {
-    const tickets = new TicketRepository(this.pool);
-    const analyses = new AnalysisRepository(this.pool);
-    const provider = createAiProvider();
-    const ticket = await tickets.findById(ticketId);
-
-    if (!ticket) {
-      throw new Error(`Ticket not found: ${ticketId}`);
-    }
+    const client = await this.pool.connect();
 
     try {
-      workflowLog("starting AI analysis", {
-        ticketId,
-        subject: ticket.subject,
+      await client.query("BEGIN");
+      const tickets = new TicketRepository(client);
+      const jobs = new AnalysisJobRepository(client);
+
+      workflowLog("validated ticket submission", {
+        customerEmail: parsed.customerEmail,
+        subject: parsed.subject,
       });
 
-      const result = await provider.analyzeTicket({ ticket });
-      workflowLog("received AI analysis", {
-        ticketId,
-        provider: result.provider,
-        model: result.model,
-        category: result.output.category,
-        priority: result.output.priority,
-        priorityReason: result.output.priorityReason,
-        categoryConfidence: result.output.confidence,
-        categoryConfidenceReason: result.output.confidenceReason,
+      const ticket = await tickets.create(parsed);
+      workflowLog("saved ticket for async analysis pipeline", {
+        ticketId: ticket.id,
+        status: ticket.status,
       });
 
-      const validatedOutput = aiAnalysisSchema.parse(result.output);
-      workflowLog("validated AI output", {
-        ticketId,
-        category: validatedOutput.category,
-        priority: validatedOutput.priority,
-        priorityReason: validatedOutput.priorityReason,
-        categoryConfidence: validatedOutput.confidence,
-        categoryConfidenceReason: validatedOutput.confidenceReason,
+      const job = await jobs.create({
+        ticketId: ticket.id,
+      });
+      workflowLog("enqueued analysis job for background worker", {
+        jobId: job.id,
+        ticketId: ticket.id,
+        jobStatus: job.status,
+        availableAt: job.availableAt.toISOString(),
       });
 
-      const analysis = await analyses.create({
-        ticketId,
-        provider: result.provider,
-        model: result.model,
-        output: validatedOutput,
-        rawOutput: result.rawOutput,
+      await client.query("COMMIT");
+      workflowLog("ticket submission transaction committed", {
+        ticketId: ticket.id,
+        jobId: job.id,
+        nextStep: "background worker will claim the queued job",
       });
-      workflowLog("saved AI analysis", {
-        analysisId: analysis.id,
-        ticketId,
-        provider: result.provider,
-        model: result.model,
-        category: analysis.category,
-        priority: analysis.priority,
-        categoryConfidence: analysis.confidence,
-      });
-
-      await tickets.updateStatus(ticketId, "processed");
-      workflowLog("ticket moved to processed", {
-        ticketId,
-      });
+      return ticket;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown AI processing error";
-      workflowLog("AI analysis failed", {
-        ticketId,
-        error: message,
-      });
-      await tickets.updateStatus(ticketId, "failed", message);
+      await client.query("ROLLBACK");
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -132,6 +83,74 @@ export class TicketService {
     }
   }
 
+  async retryAnalysisJob(ticketId: string) {
+    workflowLog("analysis job retry requested", {
+      ticketId,
+    });
+
+    const client = await this.pool.connect();
+
+    try {
+      await client.query("BEGIN");
+      const tickets = new TicketRepository(client);
+      const jobs = new AnalysisJobRepository(client);
+      const ticket = await tickets.findById(ticketId);
+
+      if (!ticket) {
+        workflowLog("analysis job retry rejected", {
+          ticketId,
+          reason: "ticket_not_found",
+        });
+        throw new Error(`Ticket not found: ${ticketId}`);
+      }
+
+      const job = await jobs.findByTicketId(ticketId);
+
+      if (!job) {
+        workflowLog("analysis job retry rejected", {
+          ticketId,
+          reason: "analysis_job_not_found",
+        });
+        throw new Error(`Analysis job not found for ticket: ${ticketId}`);
+      }
+
+      if (job.status !== "failed") {
+        workflowLog("analysis job retry rejected", {
+          ticketId,
+          jobId: job.id,
+          reason: "job_not_failed",
+          currentJobStatus: job.status,
+        });
+        throw new Error(`Only failed analysis jobs can be retried. Current status: ${job.status}`);
+      }
+
+      const requeuedJob = await jobs.requeue(job.id);
+      workflowLog("analysis job retry accepted", {
+        ticketId,
+        jobId: requeuedJob.id,
+        previousJobStatus: job.status,
+        nextJobStatus: requeuedJob.status,
+        attemptCount: requeuedJob.attemptCount,
+        availableAt: requeuedJob.availableAt.toISOString(),
+      });
+
+      await client.query("COMMIT");
+      workflowLog("analysis job retry committed", {
+        ticketId,
+        jobId: requeuedJob.id,
+        ticketStatus: ticket.status,
+        jobStatus: requeuedJob.status,
+      });
+
+      return requeuedJob;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async listTickets() {
     return new TicketRepository(this.pool).list();
   }
@@ -139,6 +158,7 @@ export class TicketService {
   async getTicketWithDetails(ticketId: string): Promise<TicketWithDetails | null> {
     const tickets = new TicketRepository(this.pool);
     const analyses = new AnalysisRepository(this.pool);
+    const jobs = new AnalysisJobRepository(this.pool);
     const reviews = new ReviewRepository(this.pool);
     const ticket = await tickets.findById(ticketId);
 
@@ -149,6 +169,7 @@ export class TicketService {
     return {
       ticket,
       latestAnalysis: await analyses.findLatestForTicket(ticketId),
+      analysisJob: await jobs.findByTicketId(ticketId),
       reviewActions: await reviews.listForTicket(ticketId),
     };
   }

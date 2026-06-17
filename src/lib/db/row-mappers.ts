@@ -1,4 +1,4 @@
-import type { ReviewAction, Ticket, TicketAnalysis } from "@/lib/domain/types";
+import type { AnalysisJob, ReviewAction, Ticket, TicketAnalysis } from "@/lib/domain/types";
 
 type TicketRow = {
   id: string;
@@ -37,6 +37,18 @@ type ReviewActionRow = {
   final_reply: string | null;
   notes: string | null;
   created_at: Date;
+};
+
+type AnalysisJobRow = {
+  id: string;
+  ticket_id: string;
+  status: AnalysisJob["status"];
+  attempt_count: number;
+  last_error: string | null;
+  locked_at: Date | null;
+  available_at: Date;
+  created_at: Date;
+  updated_at: Date;
 };
 
 export function mapTicket(row: TicketRow): Ticket {
@@ -81,5 +93,19 @@ export function mapReviewAction(row: ReviewActionRow): ReviewAction {
     finalReply: row.final_reply,
     notes: row.notes,
     createdAt: row.created_at,
+  };
+}
+
+export function mapAnalysisJob(row: AnalysisJobRow): AnalysisJob {
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    lastError: row.last_error,
+    lockedAt: row.locked_at,
+    availableAt: row.available_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

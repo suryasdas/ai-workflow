@@ -19,10 +19,12 @@ export const ticketCategories = [
 ] as const;
 
 export const reviewDecisions = ["approved", "edited", "rejected"] as const;
+export const analysisJobStatuses = ["queued", "processing", "completed", "failed"] as const;
 
 export type TicketStatus = (typeof ticketStatuses)[number];
 export type TicketCategory = (typeof ticketCategories)[number];
 export type ReviewDecision = (typeof reviewDecisions)[number];
+export type AnalysisJobStatus = (typeof analysisJobStatuses)[number];
 
 export const createTicketSchema = z.object({
   customerEmail: z.string().email(),
@@ -93,8 +95,21 @@ export type ReviewAction = {
   createdAt: Date;
 };
 
+export type AnalysisJob = {
+  id: string;
+  ticketId: string;
+  status: AnalysisJobStatus;
+  attemptCount: number;
+  lastError: string | null;
+  lockedAt: Date | null;
+  availableAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type TicketWithDetails = {
   ticket: Ticket;
   latestAnalysis: TicketAnalysis | null;
+  analysisJob: AnalysisJob | null;
   reviewActions: ReviewAction[];
 };

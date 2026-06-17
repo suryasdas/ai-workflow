@@ -6,7 +6,7 @@ import { TicketService } from "@/lib/services/ticket-service";
 import type { Ticket } from "@/lib/domain/types";
 
 const statusLabels = {
-  new: "New",
+  new: "Queued",
   processing: "Processing",
   processed: "Ready for review",
   approved: "Approved",

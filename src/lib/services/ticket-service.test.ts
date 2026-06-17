@@ -1,13 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AiProviderResult } from "@/lib/ai/types";
-import type { AiAnalysisOutput, ReviewAction, Ticket } from "@/lib/domain/types";
+import type { AnalysisJob, ReviewAction, Ticket, TicketAnalysis } from "@/lib/domain/types";
 
 const mockPool = {
   connect: vi.fn(),
-};
-
-const mockProvider = {
-  analyzeTicket: vi.fn(),
 };
 
 const mockTicketRepository = {
@@ -22,6 +17,12 @@ const mockAnalysisRepository = {
   findLatestForTicket: vi.fn(),
 };
 
+const mockAnalysisJobRepository = {
+  create: vi.fn(),
+  findByTicketId: vi.fn(),
+  requeue: vi.fn(),
+};
+
 const mockReviewRepository = {
   create: vi.fn(),
   listForTicket: vi.fn(),
@@ -29,10 +30,6 @@ const mockReviewRepository = {
 
 vi.mock("@/lib/db/client", () => ({
   getPool: () => mockPool,
-}));
-
-vi.mock("@/lib/ai/provider-factory", () => ({
-  createAiProvider: () => mockProvider,
 }));
 
 vi.mock("@/lib/repositories/ticket-repository", () => ({
@@ -48,6 +45,14 @@ vi.mock("@/lib/repositories/analysis-repository", () => ({
   AnalysisRepository: class AnalysisRepository {
     create = mockAnalysisRepository.create;
     findLatestForTicket = mockAnalysisRepository.findLatestForTicket;
+  },
+}));
+
+vi.mock("@/lib/repositories/analysis-job-repository", () => ({
+  AnalysisJobRepository: class AnalysisJobRepository {
+    create = mockAnalysisJobRepository.create;
+    findByTicketId = mockAnalysisJobRepository.findByTicketId;
+    requeue = mockAnalysisJobRepository.requeue;
   },
 }));
 
@@ -75,32 +80,23 @@ const baseTicket: Ticket = {
   updatedAt: new Date("2026-06-17T00:00:00.000Z"),
 };
 
-const processingTicket: Ticket = {
-  ...baseTicket,
-  status: "processing",
-  updatedAt: new Date("2026-06-17T00:00:01.000Z"),
+const baseJob: AnalysisJob = {
+  id: "397cdcb6-b8bf-470f-824e-500bc3324a0f",
+  ticketId: baseTicket.id,
+  status: "queued",
+  attemptCount: 0,
+  lastError: null,
+  lockedAt: null,
+  availableAt: new Date("2026-06-17T00:00:00.000Z"),
+  createdAt: new Date("2026-06-17T00:00:00.000Z"),
+  updatedAt: new Date("2026-06-17T00:00:00.000Z"),
 };
 
-const processedTicket: Ticket = {
-  ...baseTicket,
-  status: "processed",
-  updatedAt: new Date("2026-06-17T00:00:02.000Z"),
-};
-
-const approvedTicket: Ticket = {
-  ...baseTicket,
-  status: "approved",
-  updatedAt: new Date("2026-06-17T00:00:03.000Z"),
-};
-
-const failedTicket: Ticket = {
-  ...baseTicket,
-  status: "failed",
-  failureReason: "Claude timed out",
-  updatedAt: new Date("2026-06-17T00:00:03.000Z"),
-};
-
-const validOutput: AiAnalysisOutput = {
+const baseAnalysis: TicketAnalysis = {
+  id: "1881cbc7-d629-49ce-b092-bd1bab7f53f8",
+  ticketId: baseTicket.id,
+  provider: "anthropic",
+  model: "claude-opus-4-6",
   category: "refund_request",
   sentiment: "frustrated",
   priority: 4,
@@ -110,19 +106,43 @@ const validOutput: AiAnalysisOutput = {
   summary: "Customer says they were charged twice for the same subscription renewal today.",
   draftReply:
     "I am sorry about the duplicate subscription charge. I am reviewing the billing record now and will help make sure the extra charge is resolved quickly.",
+  rawOutput: { id: "msg_123" },
+  createdAt: new Date("2026-06-17T00:00:02.000Z"),
 };
 
-const baseProviderResult: AiProviderResult = {
-  provider: "anthropic",
-  model: "claude-opus-4-6",
-  output: validOutput,
-  rawOutput: { id: "msg_123" },
+const failedTicket: Ticket = {
+  ...baseTicket,
+  status: "failed",
+  failureReason: "Anthropic API request failed: 529 overloaded",
+  updatedAt: new Date("2026-06-17T00:00:04.000Z"),
+};
+
+const failedJob: AnalysisJob = {
+  ...baseJob,
+  status: "failed",
+  attemptCount: 1,
+  lastError: "Anthropic API request failed: 529 overloaded",
+  updatedAt: new Date("2026-06-17T00:00:04.000Z"),
+};
+
+const requeuedJob: AnalysisJob = {
+  ...failedJob,
+  status: "queued",
+  lastError: null,
+  availableAt: new Date("2026-06-17T00:00:05.000Z"),
+  updatedAt: new Date("2026-06-17T00:00:05.000Z"),
+};
+
+const approvedTicket: Ticket = {
+  ...baseTicket,
+  status: "approved",
+  updatedAt: new Date("2026-06-17T00:00:03.000Z"),
 };
 
 const baseReviewAction: ReviewAction = {
   id: "f4bdb017-7dca-4d55-b382-d2ebfa5d8cd8",
   ticketId: baseTicket.id,
-  analysisId: "1881cbc7-d629-49ce-b092-bd1bab7f53f8",
+  analysisId: baseAnalysis.id,
   reviewerName: "Riley",
   decision: "approved",
   finalReply:
@@ -142,48 +162,24 @@ describe("TicketService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPool.connect.mockReset();
-    mockProvider.analyzeTicket.mockReset();
     mockTicketRepository.create.mockReset();
     mockTicketRepository.updateStatus.mockReset();
     mockTicketRepository.findById.mockReset();
     mockTicketRepository.list.mockReset();
     mockAnalysisRepository.create.mockReset();
     mockAnalysisRepository.findLatestForTicket.mockReset();
+    mockAnalysisJobRepository.create.mockReset();
+    mockAnalysisJobRepository.findByTicketId.mockReset();
+    mockAnalysisJobRepository.requeue.mockReset();
     mockReviewRepository.create.mockReset();
     mockReviewRepository.listForTicket.mockReset();
   });
 
-  it("submits a ticket, runs AI analysis, saves the analysis, and marks the ticket processed", async () => {
+  it("submits a ticket and enqueues an analysis job", async () => {
+    const client = createFakeClient();
+    mockPool.connect.mockResolvedValue(client);
     mockTicketRepository.create.mockResolvedValue(baseTicket);
-    mockTicketRepository.findById.mockResolvedValue(processingTicket);
-    mockTicketRepository.updateStatus.mockImplementation(async (_id: string, status: string) => {
-      if (status === "processing") {
-        return processingTicket;
-      }
-
-      if (status === "processed") {
-        return processedTicket;
-      }
-
-      throw new Error(`Unexpected status update in test: ${status}`);
-    });
-    mockProvider.analyzeTicket.mockResolvedValue(baseProviderResult);
-    mockAnalysisRepository.create.mockResolvedValue({
-      id: "1881cbc7-d629-49ce-b092-bd1bab7f53f8",
-      ticketId: baseTicket.id,
-      provider: "anthropic",
-      model: "claude-opus-4-6",
-      category: validOutput.category,
-      sentiment: validOutput.sentiment,
-      priority: validOutput.priority,
-      priorityReason: validOutput.priorityReason,
-      confidence: validOutput.confidence,
-      confidenceReason: validOutput.confidenceReason,
-      summary: validOutput.summary,
-      draftReply: validOutput.draftReply,
-      rawOutput: baseProviderResult.rawOutput,
-      createdAt: new Date("2026-06-17T00:00:02.000Z"),
-    });
+    mockAnalysisJobRepository.create.mockResolvedValue(baseJob);
 
     const service = new TicketService();
     const result = await service.submitTicket({
@@ -198,41 +194,14 @@ describe("TicketService", () => {
       subject: baseTicket.subject,
       body: baseTicket.body,
     });
-    expect(mockTicketRepository.updateStatus).toHaveBeenNthCalledWith(1, baseTicket.id, "processing");
-    expect(mockProvider.analyzeTicket).toHaveBeenCalledWith({
-      ticket: processingTicket,
-    });
-    expect(mockAnalysisRepository.create).toHaveBeenCalledWith({
+    expect(client.query).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(mockAnalysisJobRepository.create).toHaveBeenCalledWith({
       ticketId: baseTicket.id,
-      provider: "anthropic",
-      model: "claude-opus-4-6",
-      output: validOutput,
-      rawOutput: baseProviderResult.rawOutput,
     });
-    expect(mockTicketRepository.updateStatus).toHaveBeenNthCalledWith(2, baseTicket.id, "processed");
-  });
-
-  it("marks the ticket failed and rethrows when AI analysis fails", async () => {
-    const failure = new Error("Claude timed out");
-
-    mockTicketRepository.findById.mockResolvedValue(processingTicket);
-    mockTicketRepository.updateStatus.mockImplementation(async (_id: string, status: string, reason?: string) => {
-      if (status === "failed") {
-        return {
-          ...failedTicket,
-          failureReason: reason ?? failedTicket.failureReason,
-        };
-      }
-
-      throw new Error(`Unexpected status update in test: ${status}`);
-    });
-    mockProvider.analyzeTicket.mockRejectedValue(failure);
-
-    const service = new TicketService();
-
-    await expect(service.processTicket(baseTicket.id)).rejects.toThrow("Claude timed out");
+    expect(client.query).toHaveBeenNthCalledWith(2, "COMMIT");
+    expect(client.release).toHaveBeenCalled();
+    expect(mockTicketRepository.updateStatus).not.toHaveBeenCalled();
     expect(mockAnalysisRepository.create).not.toHaveBeenCalled();
-    expect(mockTicketRepository.updateStatus).toHaveBeenCalledWith(baseTicket.id, "failed", "Claude timed out");
   });
 
   it("creates a review action, updates the ticket status, and commits the transaction", async () => {
@@ -266,6 +235,68 @@ describe("TicketService", () => {
     expect(result).toEqual(baseReviewAction);
   });
 
+  it("requeues a failed analysis job and leaves the ticket status unchanged", async () => {
+    const client = createFakeClient();
+    mockPool.connect.mockResolvedValue(client);
+    mockTicketRepository.findById.mockResolvedValue(failedTicket);
+    mockAnalysisJobRepository.findByTicketId.mockResolvedValue(failedJob);
+    mockAnalysisJobRepository.requeue.mockResolvedValue(requeuedJob);
+
+    const service = new TicketService();
+    const result = await service.retryAnalysisJob(baseTicket.id);
+
+    expect(client.query).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(mockTicketRepository.findById).toHaveBeenCalledWith(baseTicket.id);
+    expect(mockAnalysisJobRepository.findByTicketId).toHaveBeenCalledWith(baseTicket.id);
+    expect(mockAnalysisJobRepository.requeue).toHaveBeenCalledWith(failedJob.id);
+    expect(mockTicketRepository.updateStatus).not.toHaveBeenCalled();
+    expect(client.query).toHaveBeenNthCalledWith(2, "COMMIT");
+    expect(client.release).toHaveBeenCalled();
+    expect(result).toEqual(requeuedJob);
+  });
+
+  it("rejects retry when the ticket has no analysis job", async () => {
+    const client = createFakeClient();
+    mockPool.connect.mockResolvedValue(client);
+    mockTicketRepository.findById.mockResolvedValue(failedTicket);
+    mockAnalysisJobRepository.findByTicketId.mockResolvedValue(null);
+
+    const service = new TicketService();
+
+    await expect(service.retryAnalysisJob(baseTicket.id)).rejects.toThrow(
+      `Analysis job not found for ticket: ${baseTicket.id}`,
+    );
+
+    expect(client.query).toHaveBeenNthCalledWith(1, "BEGIN");
+    expect(client.query).toHaveBeenNthCalledWith(2, "ROLLBACK");
+    expect(mockAnalysisJobRepository.requeue).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it.each(["queued", "processing", "completed"] as const)(
+    "rejects retry when the analysis job status is %s",
+    async (status) => {
+      const client = createFakeClient();
+      mockPool.connect.mockResolvedValue(client);
+      mockTicketRepository.findById.mockResolvedValue(failedTicket);
+      mockAnalysisJobRepository.findByTicketId.mockResolvedValue({
+        ...failedJob,
+        status,
+      });
+
+      const service = new TicketService();
+
+      await expect(service.retryAnalysisJob(baseTicket.id)).rejects.toThrow(
+        `Only failed analysis jobs can be retried. Current status: ${status}`,
+      );
+
+      expect(client.query).toHaveBeenNthCalledWith(1, "BEGIN");
+      expect(client.query).toHaveBeenNthCalledWith(2, "ROLLBACK");
+      expect(mockAnalysisJobRepository.requeue).not.toHaveBeenCalled();
+      expect(client.release).toHaveBeenCalled();
+    },
+  );
+
   it("rolls back the transaction when saving the review fails", async () => {
     const client = createFakeClient();
     const failure = new Error("insert failed");
@@ -288,5 +319,22 @@ describe("TicketService", () => {
     expect(client.query).toHaveBeenNthCalledWith(2, "ROLLBACK");
     expect(mockTicketRepository.updateStatus).not.toHaveBeenCalled();
     expect(client.release).toHaveBeenCalled();
+  });
+
+  it("returns the ticket, latest analysis, analysis job, and review history", async () => {
+    mockTicketRepository.findById.mockResolvedValue(baseTicket);
+    mockAnalysisRepository.findLatestForTicket.mockResolvedValue(baseAnalysis);
+    mockAnalysisJobRepository.findByTicketId.mockResolvedValue(baseJob);
+    mockReviewRepository.listForTicket.mockResolvedValue([baseReviewAction]);
+
+    const service = new TicketService();
+    const result = await service.getTicketWithDetails(baseTicket.id);
+
+    expect(result).toEqual({
+      ticket: baseTicket,
+      latestAnalysis: baseAnalysis,
+      analysisJob: baseJob,
+      reviewActions: [baseReviewAction],
+    });
   });
 });

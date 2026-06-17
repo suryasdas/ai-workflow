@@ -15,7 +15,7 @@ function SubmitButton() {
   return (
     <button className="primary-button" type="submit" disabled={pending}>
       {pending ? <LoaderCircle className="spin" size={18} /> : <Send size={18} />}
-      {pending ? "Analyzing ticket..." : "Submit and analyze"}
+      {pending ? "Submitting ticket..." : "Submit ticket"}
     </button>
   );
 }
@@ -74,7 +74,7 @@ function PendingOverlay() {
     <div className="form-overlay" aria-live="polite" aria-busy="true">
       <div className="form-overlay-content">
         <LoaderCircle className="spin" size={28} />
-        <strong>AI analysis in progress</strong>
+        <strong>Submitting ticket</strong>
         <span className="elapsed-chip">Elapsed: {elapsedSeconds}s</span>
       </div>
     </div>

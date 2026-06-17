@@ -75,6 +75,7 @@ h2 {
 
 .status-strip,
 .panel,
+.polling-banner,
 .ticket-row,
 .message-box,
 .draft-box,
@@ -92,6 +93,24 @@ h2 {
   background: rgba(255, 255, 255, 0.6);
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.polling-banner {
+  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.polling-banner strong {
+  color: var(--accent-dark);
+  font-size: 0.82rem;
 }
 
 .workspace-grid,
@@ -123,6 +142,10 @@ h2 {
 .form-panel {
   display: grid;
   gap: 16px;
+}
+
+.inline-action-form {
+  margin-top: 16px;
 }
 
 .form-panel-shell {

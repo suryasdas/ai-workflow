@@ -42,3 +42,12 @@ export async function reviewTicketAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(`/tickets/${ticketId}`);
 }
+
+export async function retryAnalysisJobAction(formData: FormData) {
+  const ticketId = readString(formData, "ticketId");
+
+  await new TicketService().retryAnalysisJob(ticketId);
+
+  revalidatePath("/");
+  revalidatePath(`/tickets/${ticketId}`);
+}

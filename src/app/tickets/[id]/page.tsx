@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check, Pencil, X } from "lucide-react";
-import { reviewTicketAction } from "@/app/actions";
+import { ArrowLeft, Check, Pencil, RotateCcw, X } from "lucide-react";
+import { retryAnalysisJobAction, reviewTicketAction } from "@/app/actions";
+import { TicketAutoRefresh } from "@/app/ticket-auto-refresh";
 import { TicketService } from "@/lib/services/ticket-service";
 
 type Props = {
@@ -16,11 +17,19 @@ export default async function TicketPage({ params }: Props) {
     notFound();
   }
 
-  const { ticket, latestAnalysis, reviewActions } = details;
+  const { ticket, latestAnalysis, analysisJob, reviewActions } = details;
   const canReview = ticket.status === "processed" && latestAnalysis;
+  const canRetry = ticket.status === "failed" && analysisJob?.status === "failed";
+  const shouldAutoRefresh =
+    ticket.status === "new" ||
+    ticket.status === "processing" ||
+    analysisJob?.status === "queued" ||
+    analysisJob?.status === "processing";
 
   return (
     <main className="shell">
+      <TicketAutoRefresh enabled={shouldAutoRefresh} />
+
       <Link className="back-link" href="/">
         <ArrowLeft size={18} />
         Back to queue
@@ -53,7 +62,28 @@ export default async function TicketPage({ params }: Props) {
               <strong>{latestAnalysis.confidenceReason}</strong>
             </div>
           ) : (
-            <p className="subtle">No analysis has been saved yet.</p>
+            <>
+              <div className="analysis-grid">
+                <span>Analysis status</span>
+                <strong>{analysisJob?.status ?? "not queued"}</strong>
+                <span>Attempt count</span>
+                <strong>{analysisJob?.attemptCount ?? 0}</strong>
+                <span>Available at</span>
+                <strong>{analysisJob ? analysisJob.availableAt.toLocaleString() : "n/a"}</strong>
+                <span>Last error</span>
+                <strong>{analysisJob?.lastError ?? "None recorded"}</strong>
+              </div>
+
+              {canRetry ? (
+                <form action={retryAnalysisJobAction} className="inline-action-form">
+                  <input type="hidden" name="ticketId" value={ticket.id} />
+                  <button type="submit" className="secondary-button">
+                    <RotateCcw size={16} />
+                    Retry analysis
+                  </button>
+                </form>
+              ) : null}
+            </>
           )}
         </aside>
       </section>
@@ -67,7 +97,9 @@ export default async function TicketPage({ params }: Props) {
               <pre className="draft-box">{latestAnalysis.draftReply}</pre>
             </>
           ) : (
-            <p className="subtle">The AI draft will appear here once processing completes.</p>
+            <p className="subtle">
+              The AI draft will appear here after a worker claims the queued analysis job and completes processing.
+            </p>
           )}
         </article>
 
