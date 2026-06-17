@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 
@@ -12,12 +12,18 @@ if (!connectionString) {
 }
 
 const client = new Client({ connectionString });
-const sql = await readFile(join(process.cwd(), "migrations", "001_create_support_workflow.sql"), "utf8");
+const migrationsDir = join(process.cwd(), "migrations");
+const migrationFiles = (await readdir(migrationsDir))
+  .filter((fileName) => fileName.endsWith(".sql"))
+  .sort();
 
 await client.connect();
 try {
-  await client.query(sql);
-  console.log("Database migration complete.");
+  for (const fileName of migrationFiles) {
+    const sql = await readFile(join(migrationsDir, fileName), "utf8");
+    await client.query(sql);
+    console.log(`Applied migration: ${fileName}`);
+  }
 } finally {
   await client.end();
 }

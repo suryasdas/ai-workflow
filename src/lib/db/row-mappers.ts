@@ -19,7 +19,9 @@ type AnalysisRow = {
   category: TicketAnalysis["category"];
   sentiment: string;
   priority: number;
+  priority_reason: string;
   confidence: string | number;
+  confidence_reason: string;
   summary: string;
   draft_reply: string;
   raw_output: unknown;
@@ -59,7 +61,9 @@ export function mapAnalysis(row: AnalysisRow): TicketAnalysis {
     category: row.category,
     sentiment: row.sentiment,
     priority: row.priority,
+    priorityReason: row.priority_reason,
     confidence: Number(row.confidence),
+    confidenceReason: row.confidence_reason,
     summary: row.summary,
     draftReply: row.draft_reply,
     rawOutput: row.raw_output,

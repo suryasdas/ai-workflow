@@ -23,12 +23,14 @@ export class AnalysisRepository {
           category,
           sentiment,
           priority,
+          priority_reason,
           confidence,
+          confidence_reason,
           summary,
           draft_reply,
           raw_output
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `,
       [
@@ -38,7 +40,9 @@ export class AnalysisRepository {
         params.output.category,
         params.output.sentiment,
         params.output.priority,
+        params.output.priorityReason,
         params.output.confidence,
+        params.output.confidenceReason,
         params.output.summary,
         params.output.draftReply,
         JSON.stringify(params.rawOutput),

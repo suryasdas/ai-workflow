@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Inbox, Send } from "lucide-react";
 import { submitTicketAction } from "./actions";
+import { TicketSubmitForm } from "./ticket-submit-form";
 import { TicketService } from "@/lib/services/ticket-service";
 import type { Ticket } from "@/lib/domain/types";
 
@@ -45,34 +46,7 @@ export default async function HomePage() {
       </section>
 
       <section className="workspace-grid">
-        <form action={submitTicketAction} className="panel form-panel">
-          <div className="panel-heading">
-            <Send size={20} />
-            <h2>Submit Ticket</h2>
-          </div>
-          <label>
-            Customer email
-            <input name="customerEmail" type="email" required placeholder="customer@example.com" />
-          </label>
-          <label>
-            Subject
-            <input name="subject" required minLength={3} placeholder="Refund for delayed shipment" />
-          </label>
-          <label>
-            Message
-            <textarea
-              name="body"
-              required
-              minLength={10}
-              rows={8}
-              placeholder="Tell us what happened..."
-            />
-          </label>
-          <button className="primary-button" type="submit">
-            <Send size={18} />
-            Submit and analyze
-          </button>
-        </form>
+        <TicketSubmitForm action={submitTicketAction} />
 
         <section className="panel">
           <div className="panel-heading">

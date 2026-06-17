@@ -34,7 +34,9 @@ export const aiAnalysisSchema = z.object({
   category: z.enum(ticketCategories),
   sentiment: z.string().trim().min(2).max(80),
   priority: z.number().int().min(1).max(5),
+  priorityReason: z.string().trim().min(10).max(1000),
   confidence: z.number().min(0).max(1),
+  confidenceReason: z.string().trim().min(10).max(1000),
   summary: z.string().trim().min(10).max(1000),
   draftReply: z.string().trim().min(10).max(3000),
 });
@@ -71,7 +73,9 @@ export type TicketAnalysis = {
   category: TicketCategory;
   sentiment: string;
   priority: number;
+  priorityReason: string;
   confidence: number;
+  confidenceReason: string;
   summary: string;
   draftReply: string;
   rawOutput: unknown;

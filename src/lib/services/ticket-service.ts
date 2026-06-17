@@ -58,16 +58,22 @@ export class TicketService {
         model: result.model,
         category: result.output.category,
         priority: result.output.priority,
-        confidence: result.output.confidence,
+        priorityReason: result.output.priorityReason,
+        categoryConfidence: result.output.confidence,
+        categoryConfidenceReason: result.output.confidenceReason,
       });
 
       const validatedOutput = aiAnalysisSchema.parse(result.output);
       workflowLog("validated AI output", {
         ticketId,
         category: validatedOutput.category,
+        priority: validatedOutput.priority,
+        priorityReason: validatedOutput.priorityReason,
+        categoryConfidence: validatedOutput.confidence,
+        categoryConfidenceReason: validatedOutput.confidenceReason,
       });
 
-      await analyses.create({
+      const analysis = await analyses.create({
         ticketId,
         provider: result.provider,
         model: result.model,
@@ -75,9 +81,13 @@ export class TicketService {
         rawOutput: result.rawOutput,
       });
       workflowLog("saved AI analysis", {
+        analysisId: analysis.id,
         ticketId,
         provider: result.provider,
         model: result.model,
+        category: analysis.category,
+        priority: analysis.priority,
+        categoryConfidence: analysis.confidence,
       });
 
       await tickets.updateStatus(ticketId, "processed");

@@ -24,10 +24,20 @@ const requiredShape = {
   category: "one of the provided categories",
   sentiment: "short string",
   priority: "integer from 1 to 5",
-  confidence: "number from 0 to 1",
+  priorityReason: "brief explanation for why the ticket deserves that priority",
+  confidence: "number from 0 to 1 representing confidence in the selected primary category",
+  confidenceReason: "brief explanation for why the primary category assignment is certain or ambiguous",
   summary: "one short paragraph",
   draftReply: "customer-ready support reply",
 };
+
+const priorityRubric = {
+  1: "Low priority. Informational request or minor inconvenience. The customer can still proceed without significant impact.",
+  2: "Moderate-low priority. The issue is real but limited in scope or urgency, and it does not meaningfully block important work.",
+  3: "Moderate priority. The issue needs support attention soon and creates meaningful friction, but it is not severe or business-critical.",
+  4: "High priority. The customer is blocked, there is financial impact, repeated failure, or same-day urgency that deserves fast handling.",
+  5: "Critical priority. Severe customer harm, security risk, major business interruption, or an issue requiring immediate escalation.",
+} as const;
 
 function parseJsonFromClaudeText(text: string): unknown {
   const trimmed = text.trim();
@@ -76,6 +86,7 @@ export class AnthropicSupportProvider implements AiSupportProvider {
     const analysisPayload = {
       categories,
       requiredShape,
+      priorityRubric,
       ticket: {
         id: ticket.id,
         customerEmail: ticket.customerEmail,
@@ -89,6 +100,7 @@ export class AnthropicSupportProvider implements AiSupportProvider {
       ticketId: ticket.id,
       categories,
       requiredShape,
+      priorityRubric,
       subject: ticket.subject,
       bodyCharacterCount: ticket.body.length,
       body: ticket.body,
@@ -105,7 +117,7 @@ export class AnthropicSupportProvider implements AiSupportProvider {
         model: this.model,
         max_tokens: 1000,
         system:
-          "You classify customer support tickets and draft concise, empathetic replies. Return a raw JSON object only. Do not wrap it in Markdown, code fences, or explanatory text. The JSON object must contain category, sentiment, priority, confidence, summary, and draftReply.",
+          "You classify customer support tickets and draft concise, empathetic replies. Return a raw JSON object only. Do not wrap it in Markdown, code fences, or explanatory text. The JSON object must contain category, sentiment, priority, priorityReason, confidence, confidenceReason, summary, and draftReply. Follow the provided priorityRubric strictly when assigning priority. priorityReason must explicitly justify the numeric priority using the rubric and the ticket text. confidence must represent confidence in the selected primary category assignment, not confidence in the whole ticket or the draft reply. confidenceReason should explain category ambiguity or certainty grounded in the ticket text.",
         messages: [
           {
             role: "user",
@@ -152,7 +164,9 @@ export class AnthropicSupportProvider implements AiSupportProvider {
       category: output.category,
       sentiment: output.sentiment,
       priority: output.priority,
-      confidence: output.confidence,
+      priorityReason: output.priorityReason,
+      categoryConfidence: output.confidence,
+      categoryConfidenceReason: output.confidenceReason,
       summary: output.summary,
       draftReply: output.draftReply,
     });

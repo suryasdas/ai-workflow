@@ -11,6 +11,7 @@ The app takes a customer ticket, saves it, asks Claude to classify it and draft 
 - Send ticket content to Claude for structured analysis
 - Validate AI output with `zod`
 - Save analysis and draft reply
+- Save short reasons for priority and category confidence
 - Let a human reviewer approve, edit, or reject the AI-generated response
 - Keep internal traceability fields like `provider` and `model` in the backend for future provider switching
 
@@ -131,7 +132,9 @@ Important fields:
 - `category`
 - `sentiment`
 - `priority`
+- `priorityReason`
 - `confidence`
+- `confidenceReason`
 - `summary`
 - `draftReply`
 - `rawOutput`
@@ -180,7 +183,9 @@ Claude is asked to return a raw JSON object with:
   category: "damaged_item" | "refund_request" | "shipping_issue" | "account_issue" | "technical_issue" | "other";
   sentiment: string;
   priority: number;   // 1..5
-  confidence: number; // 0..1
+  priorityReason: string;
+  confidence: number; // 0..1 confidence in the selected primary category
+  confidenceReason: string;
   summary: string;
   draftReply: string;
 }
@@ -191,6 +196,12 @@ The app validates this structure with `zod` before persisting it.
 Important current limitation:
 - `priority` and `confidence` are model-generated heuristics in this v1
 - the app validates their format and bounds, but does not compute or calibrate them itself
+- `priorityReason` and `confidenceReason` make those heuristics more inspectable, but they are still model-authored explanations
+
+Confidence meaning in the current system:
+- `confidence` means confidence in the selected primary category assignment
+- it does not mean confidence in the entire analysis or confidence that the drafted reply is perfect
+- `confidenceReason` should explain why the chosen category is clear or ambiguous relative to the other categories
 
 ## Database Schema
 
@@ -272,7 +283,7 @@ This makes the AI step much easier to inspect during development.
 This version is intentionally simple:
 
 - analysis runs inline during submission, so users wait on model latency
-- priority/confidence are not rubric-based yet
+- priority is rubric-guided, but confidence is still model-generated rather than calibrated
 - only Anthropic is active today
 - provider switching is prepared for internally, but not exposed as a config choice in product UX
 - no full automated unit/integration/e2e test suite yet

@@ -45,8 +45,12 @@ export default async function TicketPage({ params }: Props) {
               <strong>{latestAnalysis.sentiment}</strong>
               <span>Priority</span>
               <strong>{latestAnalysis.priority}/5</strong>
-              <span>Confidence</span>
+              <span>Priority reason</span>
+              <strong>{latestAnalysis.priorityReason}</strong>
+              <span>Category confidence</span>
               <strong>{Math.round(latestAnalysis.confidence * 100)}%</strong>
+              <span>Category confidence reason</span>
+              <strong>{latestAnalysis.confidenceReason}</strong>
             </div>
           ) : (
             <p className="subtle">No analysis has been saved yet.</p>
